@@ -213,9 +213,38 @@ JSON structure:
       .filter((offer, index, all) => all.findIndex(other => other.url === offer.url) === index)
       .slice(0, 5)
 
+    // Prefer published, non-expired Wafarna offers when available.
+    // offer_code and offer_url come from Wafarna data, NEVER the AI response.
+    const matchedIds = safeMerchants
+      .filter(s => enrichedOffers.some(o => isSameMerchant(o.store_name, s.name)))
+      .map(s => s.id)
+    let displayedOffers = enrichedOffers
+    if (matchedIds.length) {
+      const { data: published, error: offersError } = await supabase.from('offers')
+        .select('id,store_id,title,title_ar,description,description_ar,offer_code,offer_url,countries,is_global,show,end_time')
+        .in('store_id', matchedIds).eq('show', true).limit(60)
+      if (offersError) console.error('Buddy published offers:', offersError.message)
+      const now = Date.now()
+      const eligible = (published || []).filter(o =>
+        (!o.end_time || Date.parse(o.end_time) >= now) &&
+        (o.is_global === true || (Array.isArray(o.countries) && o.countries.includes(country.code)))
+      ).filter(o => isSafeOutboundUrl(o.offer_url))
+      const cards = eligible.map(o => {
+        const store = safeMerchants.find(s => s.id === o.store_id)
+        return store && {
+          store_name: store.name, store_name_ar: store.name_ar, logo_url: store.logo_url,
+          title: lang === 'ar' ? (o.title_ar || o.title) : o.title,
+          description: lang === 'ar' ? (o.description_ar || o.description || '') : (o.description || ''),
+          code: o.offer_code || '', url: o.offer_url, cashback_pct: 0,
+          verified: false, category: 'other', source: 'wafarna_published_offer',
+        }
+      }).filter(Boolean)
+      if (cards.length) displayedOffers = cards.slice(0, 5)
+    }
+
     return res.status(200).json({
       message: parsed.message,
-      offers: enrichedOffers,
+      offers: displayedOffers,
       tip: parsed.tip,
       intent,
     })
