@@ -119,6 +119,7 @@ export default function WafarnaBuddy() {
   const [msgCount, setMsgCount] = useState(0)
   const [limitReached, setLimitReached] = useState(false)
   const [user, setUser] = useState(null)
+  const [memoryEnabled, setMemoryEnabled] = useState(false)
   const bottomRef = useRef(null)
   const inputRef = useRef(null)
   const MAX = 10
@@ -127,13 +128,33 @@ export default function WafarnaBuddy() {
 
   useEffect(() => {
     supabase.auth.getUser().then(({ data }) => {
-      if (data?.user) setUser(data.user)
+      if (data?.user) {
+        setUser(data.user)
+        supabase.from('buddy_preferences').select('memory_enabled').eq('user_id', data.user.id).maybeSingle()
+          .then(({ data: p }) => setMemoryEnabled(Boolean(p?.memory_enabled)))
+      }
     })
   }, [])
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
+
+  const toggleMemory = async () => {
+    if (!user) return
+    const next = !memoryEnabled
+    const { error } = await supabase.from('buddy_preferences').upsert({
+      user_id: user.id, memory_enabled: next, updated_at: new Date().toISOString()
+    }, { onConflict: 'user_id' })
+    if (!error) setMemoryEnabled(next)
+  }
+
+  const rateResponse = async (query, rating) => {
+    if (!user) return
+    await supabase.from('buddy_feedback').insert({
+      user_id: user.id, search_query: query.slice(0, 500), rating, country: country?.code
+    })
+  }
 
   const startChat = (c) => {
     setCountry(c)
@@ -196,6 +217,7 @@ export default function WafarnaBuddy() {
           country,
           lang,
           userId: user?.id || null,
+          memoryEnabled,
         }),
       })
 
@@ -214,6 +236,7 @@ export default function WafarnaBuddy() {
         text: data.message || '',
         offers: data.offers || [],
         tip: data.tip || null,
+        query,
       }])
     } catch (err) {
       setMessages(prev => [...prev, {
@@ -257,6 +280,9 @@ export default function WafarnaBuddy() {
                 {country.flag} {isAr ? country.name_ar : country.name}
               </button>
             )}
+            {user && <button className="lang-btn" onClick={toggleMemory} aria-pressed={memoryEnabled}>
+              {isAr ? (memoryEnabled ? 'الذاكرة مفعلة' : 'تفعيل الذاكرة') : (memoryEnabled ? 'Memory on' : 'Enable memory')}
+            </button>}
             <button className="lang-btn" onClick={toggleLang}>{s.langBtn}</button>
           </div>
         </div>
@@ -308,6 +334,10 @@ export default function WafarnaBuddy() {
                             onShop={logClick}
                           />
                         ))}
+                        {user && msg.query && <div className="feedback-actions" style={{display:'flex',gap:8,marginTop:8}}>
+                          <button onClick={() => rateResponse(msg.query, 'helpful')} aria-label="Helpful recommendation">👍</button>
+                          <button onClick={() => rateResponse(msg.query, 'not_helpful')} aria-label="Not helpful recommendation">👎</button>
+                        </div>}
                         {msg.tip && (
                           <div className="tip-box">
                             <span>{s.tip}:</span> {msg.tip}
