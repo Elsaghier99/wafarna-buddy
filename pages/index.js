@@ -163,7 +163,7 @@ export default function WafarnaBuddy() {
   }
 
   const rateResponse = async (query, rating) => {
-    if (!user) return
+    if (!user || !memoryEnabled) return
     await supabase.from('buddy_feedback').insert({
       user_id: user.id, search_query: query.slice(0, 500), rating, country: country?.code
     })
@@ -205,7 +205,7 @@ export default function WafarnaBuddy() {
   }
 
   const sendMessage = async (text) => {
-    const query = text || input.trim()
+    const query = (text || input).trim()
     if (!query || loading || limitReached) return
     if (msgCount >= MAX) { setLimitReached(true); return }
 
@@ -230,8 +230,6 @@ export default function WafarnaBuddy() {
           messages: apiMessages,
           country,
           lang,
-          userId: user?.id || null,
-          memoryEnabled,
         }),
       })
 
@@ -349,7 +347,7 @@ export default function WafarnaBuddy() {
                             onShop={logClick}
                           />
                         ))}
-                        {user && msg.query && <div className="feedback-actions" style={{display:'flex',gap:8,marginTop:8}}>
+                        {user && memoryEnabled && msg.query && <div className="feedback-actions" style={{display:'flex',gap:8,marginTop:8}}>
                           <button onClick={() => rateResponse(msg.query, 'helpful')} aria-label="Helpful recommendation">👍</button>
                           <button onClick={() => rateResponse(msg.query, 'not_helpful')} aria-label="Not helpful recommendation">👎</button>
                         </div>}
