@@ -21,7 +21,7 @@ const STRINGS = {
     copy: 'Copy', copied: 'Copied! ✓',
     verified: 'Verified by Wafarna', online: 'Found online', cashback: 'Cashback',
     limitTitle: 'Daily limit reached (10 searches)',
-    limitSub: 'Come back tomorrow for free, or upgrade for unlimited searches.',
+    limitSub: 'Come back tomorrow to search again.',
     upgrade: 'Upgrade to Wafarna Pro ⚡',
     status: 'AI Deal Hunter', langBtn: 'عربي',
     hint: 'Press Enter to search · Results may vary · Always verify at checkout',
@@ -37,7 +37,7 @@ const STRINGS = {
     copy: 'انسخ', copied: 'تم النسخ ✓',
     verified: 'موثق من وفرنا', online: 'من الإنترنت', cashback: 'كاش باك',
     limitTitle: 'وصلت للحد اليومي (10 بحث)',
-    limitSub: 'ارجع غداً مجاناً، أو اشترك في وفرنا برو للبحث بلا حدود.',
+    limitSub: 'ارجع بكرة علشان تبحث من جديد.',
     upgrade: 'اشترك في وفرنا برو ⚡',
     status: 'صياد العروض الذكي', langBtn: 'English',
     hint: 'اضغط Enter للبحث · تحقق دائماً عند الشراء',
@@ -133,7 +133,7 @@ export default function WafarnaBuddy() {
   }, [messages, loading])
 
   const clearShoppingHistory = async () => {
-    if (!user) return
+    if (!user || !window.confirm(isAr ? 'هل تريد مسح سجل التسوق والذاكرة نهائياً؟' : 'Delete saved shopping history and memory?')) return
     const tables = ['user_searches', 'user_clicks', 'user_watchlist', 'buddy_feedback']
     const results = await Promise.all(tables.map(table =>
       supabase.from(table).delete().eq('user_id', user.id)
@@ -175,6 +175,14 @@ export default function WafarnaBuddy() {
   }
 
   const toggleLang = () => setLang(l => l === 'en' ? 'ar' : 'en')
+  const signIn = async () => {
+    const email = window.prompt(isAr ? 'أدخل بريدك لإرسال رابط تسجيل الدخول' : 'Enter your email for a sign-in link')
+    if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())) return
+    const { error } = await supabase.auth.signInWithOtp({
+      email: email.trim(), options: { emailRedirectTo: window.location.origin }
+    })
+    window.alert(error ? (isAr ? 'تعذر إرسال الرابط' : 'Could not send link') : (isAr ? 'راجع بريدك الإلكتروني' : 'Check your email for the sign-in link'))
+  }
 
   const addToWatchlist = async (offer) => {
     if (!user) return
@@ -284,6 +292,7 @@ export default function WafarnaBuddy() {
                 {country.flag} {isAr ? country.name_ar : country.name}
               </button>
             )}
+            {!user && <button className="lang-btn" onClick={signIn}>{isAr ? 'تسجيل الدخول' : 'Sign in'}</button>}
             {user && <button className="lang-btn" onClick={toggleMemory} aria-pressed={memoryEnabled}>
               {isAr ? (memoryEnabled ? 'الذاكرة مفعلة' : 'تفعيل الذاكرة') : (memoryEnabled ? 'Memory on' : 'Enable memory')}
             </button>}
