@@ -9,7 +9,7 @@ const supabase = createClient(
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { messages, country, lang } = req.body
+  const { messages, country, lang } = req.body || {}
   // Never trust identity or memory preference supplied in the request body.
   const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
   let userId = null
@@ -32,6 +32,13 @@ export default async function handler(req, res) {
     return res.status(400).json({ error: 'Invalid chat request' })
   }
 
+  // Enforce the same conservative server-side quota for every visitor.
+  // Production should replace the in-memory limiter with a shared atomic Redis/DB limiter.
+  const forwarded = String(req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+  const clientKey = userId || String(req.headers['x-real-ip'] || forwarded || 'unknown')
+  const { allowRequest } = await import('../../lib/request-limit')
+  if (!allowRequest(clientKey)) return res.status(429).json({ error: 'LIMIT_REACHED' })
+
   // Check usage limit
   if (userId) {
     const today = new Date().toISOString().split('T')[0]
@@ -47,7 +54,7 @@ export default async function handler(req, res) {
       return res.status(429).json({ error: 'LIMIT_REACHED' })
     }
 
-    // Increment usage
+    // Increment usage (not atomic; replaced by shared limiter for deployment).
     await userSupabase.from('user_usage').upsert(
       { user_id: userId, date: today, message_count: count + 1 },
       { onConflict: 'user_id,date' }
@@ -221,12 +228,13 @@ JSON structure:
     let displayedOffers = enrichedOffers
     if (matchedIds.length) {
       const { data: published, error: offersError } = await supabase.from('offers')
-        .select('id,store_id,title,title_ar,description,description_ar,offer_code,offer_url,countries,is_global,show,end_time')
+        .select('id,store_id,title,title_ar,description,description_ar,offer_code,offer_url,countries,is_global,show,start_time,end_time')
         .in('store_id', matchedIds).eq('show', true).limit(60)
       if (offersError) console.error('Buddy published offers:', offersError.message)
       const now = Date.now()
       const eligible = (published || []).filter(o =>
-        (!o.end_time || Date.parse(o.end_time) >= now) &&
+        (!o.start_time || (Number.isFinite(Date.parse(o.start_time)) && Date.parse(o.start_time) <= now)) &&
+        (!o.end_time || (Number.isFinite(Date.parse(o.end_time)) && Date.parse(o.end_time) >= now)) &&
         (o.is_global === true || (Array.isArray(o.countries) && o.countries.includes(country.code)))
       ).filter(o => isSafeOutboundUrl(o.offer_url))
       const cards = eligible.map(o => {
@@ -239,13 +247,13 @@ JSON structure:
           verified: false, category: 'other', source: 'wafarna_published_offer',
         }
       }).filter(Boolean)
-      if (cards.length) displayedOffers = cards.slice(0, 5)
+      if (cards.length) displayedOffers = cards.filter((c, i, all) => all.findIndex(x => x.url === c.url && x.code === c.code) === i).slice(0, 5)
     }
 
     return res.status(200).json({
-      message: parsed.message,
+      message: typeof parsed.message === "string" ? parsed.message.slice(0, 1200) : "",
       offers: displayedOffers,
-      tip: parsed.tip,
+      tip: typeof parsed.tip === "string" ? parsed.tip.slice(0, 350) : null,
       intent,
     })
   } catch (err) {
