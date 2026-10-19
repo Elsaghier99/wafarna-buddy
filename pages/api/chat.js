@@ -11,14 +11,16 @@ export default async function handler(req, res) {
 
   const { messages, country, lang } = req.body
   // Never trust identity or memory preference supplied in the request body.
-  const token = String(req.headers.authorization || '').replace(/^Bearer\\s+/i, '')
+  const token = String(req.headers.authorization || '').replace(/^Bearer\s+/i, '')
   let userId = null
+  let userSupabase = null
   let memoryEnabled = false
   if (token) {
     const { data: authData, error: authError } = await supabase.auth.getUser(token)
     if (!authError && authData?.user) {
       userId = authData.user.id
-      const { data: prefs } = await supabase.from('buddy_preferences')
+      userSupabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY, { global: { headers: { Authorization: `Bearer ${token}` } } })
+      const { data: prefs } = await userSupabase.from('buddy_preferences')
         .select('memory_enabled').eq('user_id', userId).maybeSingle()
       memoryEnabled = prefs?.memory_enabled === true
     }
@@ -29,7 +31,7 @@ export default async function handler(req, res) {
   // Check usage limit
   if (userId) {
     const today = new Date().toISOString().split('T')[0]
-    const { data: usage } = await supabase
+    const { data: usage } = await userSupabase
       .from('user_usage')
       .select('message_count')
       .eq('user_id', userId)
@@ -42,7 +44,7 @@ export default async function handler(req, res) {
     }
 
     // Increment usage
-    await supabase.from('user_usage').upsert(
+    await userSupabase.from('user_usage').upsert(
       { user_id: userId, date: today, message_count: count + 1 },
       { onConflict: 'user_id,date' }
     )
@@ -52,14 +54,14 @@ export default async function handler(req, res) {
   let searchHistory = 'none yet'
   let clickHistory = 'none yet'
   if (userId && memoryEnabled) {
-    const { data: searches } = await supabase
+    const { data: searches } = await userSupabase
       .from('user_searches')
       .select('query')
       .eq('user_id', userId)
       .order('created_at', { ascending: false })
       .limit(8)
 
-    const { data: clicks } = await supabase
+    const { data: clicks } = await userSupabase
       .from('user_clicks')
       .select('category')
       .eq('user_id', userId)
@@ -76,7 +78,7 @@ export default async function handler(req, res) {
   // Save search to user_searches
   const lastUserMsg = messages[messages.length - 1]?.content
   if (userId && memoryEnabled && lastUserMsg) {
-    await supabase.from('user_searches').insert({
+    await userSupabase.from('user_searches').insert({
       user_id: userId,
       query: lastUserMsg,
       country: country.code,
