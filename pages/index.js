@@ -140,6 +140,19 @@ export default function WafarnaBuddy() {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
+  const clearShoppingHistory = async () => {
+    if (!user) return
+    const tables = ['user_searches', 'user_clicks', 'user_watchlist', 'buddy_feedback']
+    const results = await Promise.all(tables.map(table =>
+      supabase.from(table).delete().eq('user_id', user.id)
+    ))
+    const pref = await supabase.from('buddy_preferences').delete().eq('user_id', user.id)
+    if (results.every(r => !r.error) && !pref.error) {
+      setMemoryEnabled(false)
+      setMessages([])
+    }
+  }
+
   const toggleMemory = async () => {
     if (!user) return
     const next = !memoryEnabled
@@ -209,9 +222,10 @@ export default function WafarnaBuddy() {
       .filter(m => m.content)
 
     try {
+      const { data: sessionData } = await supabase.auth.getSession()
       const res = await fetch('/api/chat', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...(sessionData?.session?.access_token ? { Authorization: `Bearer ${sessionData.session.access_token}` } : {}) },
         body: JSON.stringify({
           messages: apiMessages,
           country,
@@ -283,6 +297,7 @@ export default function WafarnaBuddy() {
             {user && <button className="lang-btn" onClick={toggleMemory} aria-pressed={memoryEnabled}>
               {isAr ? (memoryEnabled ? 'الذاكرة مفعلة' : 'تفعيل الذاكرة') : (memoryEnabled ? 'Memory on' : 'Enable memory')}
             </button>}
+            {user && <button className="lang-btn" onClick={clearShoppingHistory}>{isAr ? 'مسح السجل' : 'Clear history'}</button>}
             <button className="lang-btn" onClick={toggleLang}>{s.langBtn}</button>
           </div>
         </div>
