@@ -110,8 +110,8 @@ export default async function handler(req, res) {
   // Query our own merchant directory BEFORE asking AI to recommend stores.
   // Restrict suggestions to stores actually present in our database.
   const { data: merchantRows, error: merchantError } = await supabase
-    .from('stores').select('id,name,name_ar,logo_url,url').limit(1000)
-  const safeMerchants = (merchantRows || []).filter(s => isSafeOutboundUrl(s.url))
+    .from('stores').select('id,name,name_ar,logo_url,url,countries,is_global,is_active').limit(1000)
+  const safeMerchants = (merchantRows || []).filter(s => isSafeOutboundUrl(s.url) && s.is_active !== false && (s.is_global === true || (Array.isArray(s.countries) && s.countries.includes(country.code))))
   const merchantNames = safeMerchants.map(s => s.name).filter(Boolean).slice(0, 250)
   if (merchantError) console.error('Buddy merchant lookup:', merchantError.message)
 
