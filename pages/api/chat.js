@@ -107,6 +107,14 @@ export default async function handler(req, res) {
 
   const intent = classifyShoppingIntent(lastUserMsg || '')
 
+  // Query our own merchant directory BEFORE asking AI to recommend stores.
+  // Restrict suggestions to stores actually present in our database.
+  const { data: merchantRows, error: merchantError } = await supabase
+    .from('stores').select('id,name,name_ar,logo_url,url').limit(1000)
+  const safeMerchants = (merchantRows || []).filter(s => isSafeOutboundUrl(s.url))
+  const merchantNames = safeMerchants.map(s => s.name).filter(Boolean).slice(0, 250)
+  if (merchantError) console.error('Buddy merchant lookup:', merchantError.message)
+
   const systemPrompt = `You are Wafarna Buddy (وفرنا بادي), an expert AI deal hunter for the Wafarna platform.
 The user is shopping in ${lang === 'ar' ? country.name_ar : country.name} (${country.code}), currency: ${country.currency}.
 
@@ -115,7 +123,7 @@ User's top clicked categories: ${clickHistory}
 Feedback-based guidance: ${feedbackGuidance}
 Use this to personalize — prioritize categories and stores they engage with most.
 
-Shopping intent: ${intent}. You do NOT have direct merchant catalog, inventory, verified pricing, or store API access. TakeDeals is the only deal-discovery feed, and it is not integrated into this chat handler. Other network APIs provide coupons and affiliate links only. Never invent codes, prices, sale percentages, cashback, product availability, or store-specific claims. If live or verified offer data is unavailable, say so briefly and help the user choose relevant stores or a narrower search. Do not claim you searched any partner API. The backend will only show merchant cards for exact matches in our stores database, without AI-generated coupons.
+Shopping intent: ${intent}. You do NOT have direct merchant catalog, inventory, verified pricing, or store API access. TakeDeals is the only deal-discovery feed, and it is not integrated into this chat handler. Other network APIs provide coupons and affiliate links only. Never invent codes, prices, sale percentages, cashback, product availability, or store-specific claims. If live or verified offer data is unavailable, say so briefly and help the user choose relevant stores or a narrower search. Do not claim you searched any partner API. The backend will only show merchant cards for exact matches in our stores database, without AI-generated coupons. Suggest store names ONLY from this actual known directory: ${JSON.stringify(merchantNames)}. If there is no suitable store, return an empty offers list and explain honestly.
 
 CRITICAL: Respond ONLY with raw JSON. No markdown. No backticks. No explanation. 
 Start immediately with { and end with }
@@ -177,17 +185,10 @@ JSON structure:
     // Only display independently matched merchants from the Wafarna database.
     // The AI cannot verify coupon validity, price, or cashback.
     // Never copy an AI-suggested coupon or untracked merchant URL into a card.
-    const { data: knownStores, error: storesError } = await supabase
-      .from('stores')
-      .select('id, name, name_ar, logo_url, url')
-      .limit(1000)
-
-    if (storesError) console.error('Buddy stores lookup failed:', storesError.message)
-
     const enrichedOffers = (parsed.offers || [])
       .filter(offer => offer && typeof offer.store_name === 'string')
       .map(offer => {
-        const store = (knownStores || []).find(s =>
+        const store = safeMerchants.find(s =>
           isSameMerchant(s.name, offer.store_name) ||
           isSameMerchant(s.name_ar, offer.store_name)
         )
@@ -209,6 +210,7 @@ JSON structure:
         }
       })
       .filter(Boolean)
+      .filter((offer, index, all) => all.findIndex(other => other.url === offer.url) === index)
       .slice(0, 5)
 
     return res.status(200).json({
@@ -219,6 +221,6 @@ JSON structure:
     })
   } catch (err) {
     console.error('Chat API error:', err)
-    return res.status(500).json({ error: err.message })
+    return res.status(502).json({ error: 'Shopping assistant temporarily unavailable' })
   }
 }
