@@ -1,3 +1,4 @@
+import { classifyShoppingIntent, isSameMerchant, isSafeOutboundUrl } from '../../lib/shopping-intent'
 import { createClient } from '@supabase/supabase-js'
 
 const supabase = createClient(
@@ -69,6 +70,8 @@ export default async function handler(req, res) {
     })
   }
 
+  const intent = classifyShoppingIntent(lastUserMsg || '')
+
   const systemPrompt = `You are Wafarna Buddy (وفرنا بادي), an expert AI deal hunter for the Wafarna platform.
 The user is shopping in ${lang === 'ar' ? country.name_ar : country.name} (${country.code}), currency: ${country.currency}.
 
@@ -76,8 +79,7 @@ User's past searches: ${searchHistory}
 User's top clicked categories: ${clickHistory}
 Use this to personalize — prioritize categories and stores they engage with most.
 
-Search the web for REAL current discount codes, hot prices, and offers available in ${country.code}.
-Find the best 2-3 deals. Be specific and accurate.
+Shopping intent: ${intent}. You do NOT have direct merchant catalog, inventory, verified pricing, or store API access. TakeDeals is the only deal-discovery feed, and it is not integrated into this chat handler. Other network APIs provide coupons and affiliate links only. Never invent codes, prices, sale percentages, cashback, product availability, or store-specific claims. If live or verified offer data is unavailable, say so briefly and help the user choose relevant stores or a narrower search. Do not claim you searched any partner API. The backend will only show merchant cards for exact matches in our stores database, without AI-generated coupons.
 
 CRITICAL: Respond ONLY with raw JSON. No markdown. No backticks. No explanation. 
 Start immediately with { and end with }
@@ -136,36 +138,48 @@ JSON structure:
       parsed.message = rawText || (lang === 'ar' ? 'حاول تاني من فضلك' : 'Please try again.')
     }
 
-    // Enrich offers with Supabase store data
-    const enrichedOffers = await Promise.all(
-      (parsed.offers || []).map(async (offer) => {
-        const { data: store } = await supabase
-          .from('stores')
-          .select('id, name, name_ar, logo_url, url, cash_back_pct, cash_back_limit')
-          .or(`name.ilike.%${offer.store_name}%,name_ar.ilike.%${offer.store_name}%`)
-          .limit(1)
-          .single()
+    // Only display independently matched merchants from the Wafarna database.
+    // The AI cannot verify coupon validity, price, or cashback.
+    // Never copy an AI-suggested coupon or untracked merchant URL into a card.
+    const { data: knownStores, error: storesError } = await supabase
+      .from('stores')
+      .select('id, name, name_ar, logo_url, url')
+      .limit(1000)
 
-        if (store) {
-          return {
-            ...offer,
-            url: store.url || offer.url,
-            logo_url: store.logo_url || null,
-            store_name_ar: store.name_ar || offer.store_name,
-            cashback_pct: store.cash_back_pct || offer.cashback_pct || 0,
-            cashback_limit: store.cash_back_limit || null,
-            verified: true,
-          }
+    if (storesError) console.error('Buddy stores lookup failed:', storesError.message)
+
+    const enrichedOffers = (parsed.offers || [])
+      .filter(offer => offer && typeof offer.store_name === 'string')
+      .map(offer => {
+        const store = (knownStores || []).find(s =>
+          isSameMerchant(s.name, offer.store_name) ||
+          isSameMerchant(s.name_ar, offer.store_name)
+        )
+        if (!store || !isSafeOutboundUrl(store.url)) return null
+        return {
+          store_name: store.name,
+          store_name_ar: store.name_ar,
+          logo_url: store.logo_url,
+          title: store.name,
+          description: lang === 'ar'
+            ? 'استكشف المتجر. تحقق من أي خصم وشروطه قبل الشراء.'
+            : 'Explore this store. Verify any discounts and their terms before checkout.',
+          code: '',
+          url: store.url,
+          cashback_pct: 0,
+          verified: false,
+          category: 'other',
+          source: 'wafarna_store',
         }
-        return { ...offer, verified: false, cashback_pct: offer.cashback_pct || 0 }
       })
-    )
+      .filter(Boolean)
+      .slice(0, 5)
 
     return res.status(200).json({
       message: parsed.message,
       offers: enrichedOffers,
       tip: parsed.tip,
-      rawText,
+      intent,
     })
   } catch (err) {
     console.error('Chat API error:', err)
