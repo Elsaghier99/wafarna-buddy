@@ -26,7 +26,11 @@ export default async function handler(req, res) {
     }
   }
 
-  if (!messages || !country) return res.status(400).json({ error: 'Missing required fields' })
+  if (!Array.isArray(messages) || !messages.length || messages.length > 30 ||
+      messages.some(m => !['user', 'assistant'].includes(m?.role) || typeof m.content !== 'string' || m.content.length > 3000) ||
+      !country || !['EG','AE','SA','KW','QA','JO'].includes(country.code) || !['ar','en'].includes(lang)) {
+    return res.status(400).json({ error: 'Invalid chat request' })
+  }
 
   // Check usage limit
   if (userId) {
@@ -53,6 +57,7 @@ export default async function handler(req, res) {
   // Get user search history for personalization
   let searchHistory = 'none yet'
   let clickHistory = 'none yet'
+  let feedbackGuidance = 'No prior feedback available.'
   if (userId && memoryEnabled) {
     const { data: searches } = await userSupabase
       .from('user_searches')
@@ -68,6 +73,20 @@ export default async function handler(req, res) {
       .order('created_at', { ascending: false })
       .limit(20)
 
+    const { data: ratings } = await userSupabase
+      .from('buddy_feedback')
+      .select('search_query,rating')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(12)
+    if (ratings?.length) {
+      const disliked = ratings.filter(item => item.rating === 'not_helpful')
+        .slice(0, 4).map(item => item.search_query.slice(0, 100))
+      feedbackGuidance = disliked.length
+        ? 'Earlier shopping responses were marked unhelpful for: ' + disliked.join(' | ') +
+          '. Be clearer about missing verified data, suggest practical next steps, and avoid repeating generic answers.'
+        : 'The customer rated earlier recommendations helpful; keep responses concise and actionable.'
+    }
     if (searches?.length) searchHistory = searches.map(s => s.query).join(', ')
     if (clicks?.length) {
       const cats = [...new Set(clicks.map(c => c.category))].slice(0, 3)
@@ -77,6 +96,7 @@ export default async function handler(req, res) {
 
   // Save search to user_searches
   const lastUserMsg = messages[messages.length - 1]?.content
+  if (messages[messages.length - 1]?.role !== 'user') return res.status(400).json({ error: 'Last message must be user' })
   if (userId && memoryEnabled && lastUserMsg) {
     await userSupabase.from('user_searches').insert({
       user_id: userId,
@@ -92,6 +112,7 @@ The user is shopping in ${lang === 'ar' ? country.name_ar : country.name} (${cou
 
 User's past searches: ${searchHistory}
 User's top clicked categories: ${clickHistory}
+Feedback-based guidance: ${feedbackGuidance}
 Use this to personalize — prioritize categories and stores they engage with most.
 
 Shopping intent: ${intent}. You do NOT have direct merchant catalog, inventory, verified pricing, or store API access. TakeDeals is the only deal-discovery feed, and it is not integrated into this chat handler. Other network APIs provide coupons and affiliate links only. Never invent codes, prices, sale percentages, cashback, product availability, or store-specific claims. If live or verified offer data is unavailable, say so briefly and help the user choose relevant stores or a narrower search. Do not claim you searched any partner API. The backend will only show merchant cards for exact matches in our stores database, without AI-generated coupons.
