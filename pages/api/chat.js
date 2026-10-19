@@ -9,7 +9,20 @@ const supabase = createClient(
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { messages, country, lang, userId, memoryEnabled } = req.body
+  const { messages, country, lang } = req.body
+  // Never trust identity or memory preference supplied in the request body.
+  const token = String(req.headers.authorization || '').replace(/^Bearer\\s+/i, '')
+  let userId = null
+  let memoryEnabled = false
+  if (token) {
+    const { data: authData, error: authError } = await supabase.auth.getUser(token)
+    if (!authError && authData?.user) {
+      userId = authData.user.id
+      const { data: prefs } = await supabase.from('buddy_preferences')
+        .select('memory_enabled').eq('user_id', userId).maybeSingle()
+      memoryEnabled = prefs?.memory_enabled === true
+    }
+  }
 
   if (!messages || !country) return res.status(400).json({ error: 'Missing required fields' })
 
