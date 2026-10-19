@@ -9,7 +9,7 @@ const supabase = createClient(
 export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' })
 
-  const { messages, country, lang, userId } = req.body
+  const { messages, country, lang, userId, memoryEnabled } = req.body
 
   if (!messages || !country) return res.status(400).json({ error: 'Missing required fields' })
 
@@ -38,7 +38,7 @@ export default async function handler(req, res) {
   // Get user search history for personalization
   let searchHistory = 'none yet'
   let clickHistory = 'none yet'
-  if (userId) {
+  if (userId && memoryEnabled) {
     const { data: searches } = await supabase
       .from('user_searches')
       .select('query')
@@ -62,7 +62,7 @@ export default async function handler(req, res) {
 
   // Save search to user_searches
   const lastUserMsg = messages[messages.length - 1]?.content
-  if (userId && lastUserMsg) {
+  if (userId && memoryEnabled && lastUserMsg) {
     await supabase.from('user_searches').insert({
       user_id: userId,
       query: lastUserMsg,
