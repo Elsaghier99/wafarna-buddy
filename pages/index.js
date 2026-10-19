@@ -14,7 +14,7 @@ const COUNTRIES = [
 const STRINGS = {
   en: {
     title: 'Welcome to Wafarna Buddy',
-    sub: 'Your AI deal hunter — choose your country to start',
+    sub: 'Find stores and savings with AI. Choose your country to begin',
     ph: 'What are you looking for deals on?',
     suggs: ['Nike discount codes', 'Best laptop deals', 'iPhone offers', 'SHEIN coupons', 'Amazon promo codes', 'Hotel deals'],
     shop: 'Shop Now', alert: 'Alert me', alerted: 'Alerted! 🔔',
@@ -30,7 +30,7 @@ const STRINGS = {
   },
   ar: {
     title: 'أهلاً في وفرنا بادي',
-    sub: 'صياد العروض الذكي — اختار بلدك وابدأ',
+    sub: 'اكتشف المتاجر وفرص التوفير بالذكاء الاصطناعي. اختار بلدك وابدأ',
     ph: 'دورلك على إيه النهارده؟',
     suggs: ['كودات خصم نايكي', 'أفضل عروض اللاب توب', 'عروض الآيفون', 'كوبونات شي إن', 'كودات أمازون', 'عروض الفنادق'],
     shop: 'اشتري دلوقتي', alert: 'نبهني', alerted: 'تم التنبيه 🔔',
@@ -46,9 +46,8 @@ const STRINGS = {
   },
 }
 
-function OfferCard({ offer, lang, strings, onAlert, onShop }) {
+function OfferCard({ offer, lang, strings, onShop }) {
   const [copied, setCopied] = useState(false)
-  const [alerted, setAlerted] = useState(false)
   const isAr = lang === 'ar'
   const hasCode = offer.code && offer.code !== '' && offer.code !== 'null'
 
@@ -56,11 +55,6 @@ function OfferCard({ offer, lang, strings, onAlert, onShop }) {
     navigator.clipboard.writeText(offer.code).catch(() => {})
     setCopied(true)
     setTimeout(() => setCopied(false), 2000)
-  }
-
-  const handleAlert = () => {
-    setAlerted(true)
-    onAlert && onAlert(offer)
   }
 
   return (
@@ -78,7 +72,7 @@ function OfferCard({ offer, lang, strings, onAlert, onShop }) {
         <div className="badges">
           {offer.verified
             ? <span className="badge badge-green">✓ {strings.verified}</span>
-            : <span className="badge badge-gray">🔍 {strings.online}</span>
+            : <span className="badge badge-gray">{isAr ? 'متجر متاح' : 'Available store'}</span>
           }
           {offer.cashback_pct > 0 && (
             <span className="badge badge-gold">+{offer.cashback_pct}% {strings.cashback}</span>
@@ -99,12 +93,10 @@ function OfferCard({ offer, lang, strings, onAlert, onShop }) {
       )}
 
       <div className="offer-actions">
-        <button className="btn-shop" onClick={() => { window.open(offer.url, '_blank'); onShop && onShop(offer) }}>
+        <button className="btn-shop" onClick={() => { if (offer.url) { window.open(offer.url, '_blank', 'noopener,noreferrer'); onShop && onShop(offer) } }}>
           {strings.shop} →
         </button>
-        <button className={`btn-alert ${alerted ? 'active' : ''}`} onClick={handleAlert} disabled={alerted}>
-          {alerted ? strings.alerted : `${strings.alert} 🔔`}
-        </button>
+
       </div>
     </div>
   )
@@ -343,7 +335,6 @@ export default function WafarnaBuddy() {
                             offer={offer}
                             lang={lang}
                             strings={s}
-                            onAlert={addToWatchlist}
                             onShop={logClick}
                           />
                         ))}
@@ -387,7 +378,7 @@ export default function WafarnaBuddy() {
               <div className={`limit-banner ${isAr ? 'rtl' : 'ltr'}`}>
                 <div style={{ fontWeight: 700, marginBottom: 4 }}>{s.limitTitle}</div>
                 <div style={{ fontSize: 12 }}>{s.limitSub}</div>
-                <button className="upgrade-btn" onClick={() => alert('Stripe coming soon!')}>{s.upgrade}</button>
+
               </div>
             )}
 
